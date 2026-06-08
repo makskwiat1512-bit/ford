@@ -26,7 +26,10 @@ jobs:
           python -c "
           import json
           import subprocess
-          import sys
+          import os
+
+          # Target the GitHub environment file directly
+          env_file_path = os.environ.get('GITHUB_ENV')
 
           try:
               # Get the list.json from the previous commit
@@ -37,8 +40,11 @@ jobs:
               old_names = set()
 
           # Get current list.json data
-          with open('data/list.json', 'r') as f:
-              current_data = json.load(f)
+          try:
+              with open('data/list.json', 'r') as f:
+                  current_data = json.load(f)
+          except Exception:
+              current_data = []
 
           # Find the newly added level(s)
           new_levels = [item for item in current_data if 'name' in item and item['name'] not in old_names]
@@ -51,19 +57,19 @@ jobs:
               name = level.get('name', 'N/A')
               level_id = level.get('id', 'N/A')
               verifier = level.get('verifier', 'N/A')
-              video = level.get('verification', 'N/A') # GDListTemplate uses 'verification' for the link
+              video = level.get('verification', 'N/A')
               
-              # Output variables to GitHub Step Environment
-              with open(sys.argv[1], 'a') as env_file:
-                  env_file.write(f'HAS_NEW=true\n')
+              # Output variables to GitHub Step Environment safely
+              with open(env_file_path, 'a') as env_file:
+                  env_file.write('HAS_NEW=true\n')
                   env_file.write(f'LVL_NAME={name}\n')
                   env_file.write(f'LVL_ID={level_id}\n')
                   env_file.write(f'LVL_VERIFIER={verifier}\n')
                   env_file.write(f'LVL_VIDEO={video}\n')
           else:
-              with open(sys.argv[1], 'a') as env_file:
+              with open(env_file_path, 'a') as env_file:
                   env_file.write('HAS_NEW=false\n')
-          " "$GITHUB_ENV"
+          "
 
       - name: Send Discord Ping
         if: env.HAS_NEW == 'true'
