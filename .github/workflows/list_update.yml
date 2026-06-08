@@ -1,0 +1,85 @@
+name: Notify Discord on New Level
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'data/list.json'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Extract New Level Details
+        id: parse_level
+        run: |
+          python -c "
+          import json
+          import subprocess
+          import sys
+
+          try:
+              # Get the list.json from the previous commit
+              old_content = subprocess.check_output(['git', 'show', 'HEAD~1:data/list.json']).decode('utf-8')
+              old_data = json.loads(old_content)
+              old_names = {item['name'] for item in old_data if 'name' in item}
+          except Exception:
+              old_names = set()
+
+          # Get current list.json data
+          with open('data/list.json', 'r') as f:
+              current_data = json.load(f)
+
+          # Find the newly added level(s)
+          new_levels = [item for item in current_data if 'name' in item and item['name'] not in old_names]
+
+          if new_levels:
+              # Take the first newly detected level
+              level = new_levels[0]
+              
+              # Safely fetch fields, replacing missing items with 'N/A'
+              name = level.get('name', 'N/A')
+              level_id = level.get('id', 'N/A')
+              verifier = level.get('verifier', 'N/A')
+              video = level.get('verification', 'N/A') # GDListTemplate uses 'verification' for the link
+              
+              # Output variables to GitHub Step Environment
+              with open(sys.argv[1], 'a') as env_file:
+                  env_file.write(f'HAS_NEW=true\n')
+                  env_file.write(f'LVL_NAME={name}\n')
+                  env_file.write(f'LVL_ID={level_id}\n')
+                  env_file.write(f'LVL_VERIFIER={verifier}\n')
+                  env_file.write(f'LVL_VIDEO={video}\n')
+          else:
+              with open(sys.argv[1], 'a') as env_file:
+                  env_file.write('HAS_NEW=false\n')
+          " "$GITHUB_ENV"
+
+      - name: Send Discord Ping
+        if: env.HAS_NEW == 'true'
+        run: |
+          # Construct the exact layout message template
+          MESSAGE="<@&1512762483398414457>
+          New level on ARDL!
+          **Name:** ${{ env.LVL_NAME }}
+          **ID:** ${{ env.LVL_ID }}
+          **Verifier:** ${{ env.LVL_VERIFIER }}
+          **Verification Video:** ${{ env.LVL_VIDEO }}"
+
+          # Escape the message for JSON processing
+          PAYLOAD=$(jq -n --arg msg "$MESSAGE" '{content: $msg, username: "ARDL Updates Bot"}')
+
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "$PAYLOAD" \
+               ${{ secrets.DISCORD_WEBHOOK_URL }}
